@@ -7,6 +7,8 @@ import (
 	"os"
 	"time"
 	"encoding/json"
+	"strconv"
+	"errors"
 
 	_ "github.com/lib/pq"
 )
@@ -66,6 +68,36 @@ func createNote(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(n)
 
 }
+func putNote(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.Atoi(r.PathValue("id"))
+	if err != nil {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+	var n Note
+	if err := json.NewDecoder(r.Body).Decode(&n); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	if n.Body == "" {
+		http.Error(w, "body is required", http.StatusBadRequest)
+		return
+	}
+	err = db.QueryRow(
+		"UPDATE notes SET body = $1 WHERE id = $2 RETURNING id, body, created_at", n.Body, id).Scan(&n.ID, &n.Body,&n.CreatedAt)
+
+if errors.Is(err, sql.ErrNoRows) {
+	http.Error(w, "not found", http.StatusNotFound)
+	return
+}
+if err != nil {
+	http.Error(w, "database error", http.StatusInternalServerError)
+	log.Println(err)
+	return
+}
+w.Header().Set("Content-Type", "application/json")
+json.NewEncoder(w).Encode(n)
+}
 
 func main() {
 	dbURL := os.Getenv("DB_URL")
@@ -89,6 +121,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/notes", getNotes)
 	mux.HandleFunc("POST /api/notes", createNote)
+	mux.HandleFunc("PUT /api/notes/{id}", putNote)
 	log.Fatal(http.ListenAndServe(":8080", mux))
 }
 
